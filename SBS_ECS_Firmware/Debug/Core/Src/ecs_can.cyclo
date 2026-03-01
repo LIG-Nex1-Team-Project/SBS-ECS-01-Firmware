@@ -1,2 +1,0 @@
-../Core/Src/ecs_can.c:14:6:ECS_CAN_Filter_Init	1
-../Core/Src/ecs_can.c:21:6:ECS_CAN_ParseRxMessage	3
