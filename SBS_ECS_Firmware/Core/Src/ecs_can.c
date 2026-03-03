@@ -58,13 +58,20 @@ void ECS_CAN_Filter_Init(void) {
 
 // ecs_can.c 내 수신 처리 예시
 void ECS_CAN_ParseRxMessage(uint32_t rxId, uint8_t* rxData) {
-    if (rxId == 0x00000200) {
+    if (rxId == 0x00000200) { // DET
         // 💡 8바이트 데이터를 float 2개로 해석
         float* pData = (float*)rxData;
         g_Target_X_mm = pData[0]; // target_x
         g_Target_Y_mm = pData[1]; // target_y
         g_NewTarget_Flag = 1;
     }
+    if (rxId == 0x00000400) { // LANCHER
+
+    	//
+           uint8_t temp_state_Launcher = rxData[0];
+    }
+
+
 }
 
 void ECS_CAN_SendToLauncher(float angle, LtlCommand_e cmd) {

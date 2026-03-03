@@ -111,6 +111,8 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
+    	//can_test
+    	//ECS_CAN_SendToLauncher(45.0f, LTL_CMD_ALIGN);
         if (g_NewTarget_Flag == 1) {
             g_NewTarget_Flag = 0;
 
