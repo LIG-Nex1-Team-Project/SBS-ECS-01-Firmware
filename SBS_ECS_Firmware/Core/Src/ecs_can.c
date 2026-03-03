@@ -16,41 +16,54 @@ volatile uint8_t g_NewTarget_Flag = 0;
 volatile uint8_t g_Launcher_Status = 0;
 
 void ECS_CAN_Filter_Init(void) {
-    CAN_FilterTypeDef canFilterConfig;
+    CAN_FilterTypeDef sFilterConfig;
 
-    canFilterConfig.FilterBank = 0;
-    canFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
-    canFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    // ---------------------------------------------------------
+    // 1. 탐색기(Seeker) 수신 필터 (FilterBank 0)
+    // ---------------------------------------------------------
+    uint32_t det_filter_id = 0x00000200;
+    uint32_t strict_mask = 0x1FFFFFFF; // 29비트 전체 엄격 검사
 
-    // 💡 0x0000으로 설정하면 아이디 검사를 하지 않고 모든 CAN 메시지를 수신합니다!
-    canFilterConfig.FilterIdHigh = 0x0000;
-    canFilterConfig.FilterIdLow = 0x0000;
-    canFilterConfig.FilterMaskIdHigh = 0x0000;
-    canFilterConfig.FilterMaskIdLow = 0x0000;
+    sFilterConfig.FilterBank = 0;
+    sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+    sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+    sFilterConfig.FilterIdHigh = (uint16_t)((det_filter_id << 3) >> 16);
+    sFilterConfig.FilterIdLow  = (uint16_t)((det_filter_id << 3) | CAN_ID_EXT);
+    sFilterConfig.FilterMaskIdHigh = (uint16_t)((strict_mask << 3) >> 16);
+    sFilterConfig.FilterMaskIdLow  = (uint16_t)((strict_mask << 3) | CAN_ID_EXT);
+    sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
+    sFilterConfig.FilterActivation = ENABLE;
 
-    canFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
-    canFilterConfig.FilterActivation = ENABLE;
-    canFilterConfig.SlaveStartFilterBank = 14;
+    HAL_CAN_ConfigFilter(&hcan, &sFilterConfig);
 
-    if (HAL_CAN_ConfigFilter(&hcan, &canFilterConfig) != HAL_OK) {
+    // ---------------------------------------------------------
+    // 2. 발사대(Launcher) 수신 필터 추가 (FilterBank 1)
+    // ---------------------------------------------------------
+    uint32_t ltl_filter_id = 0x00000400; // 발사대 상태 수신 ID: 0x400
+
+    sFilterConfig.FilterBank = 1; // 💡 다른 뱅크를 사용해야 기존 필터가 안 지워집니다.
+    sFilterConfig.FilterIdHigh = (uint16_t)((ltl_filter_id << 3) >> 16);
+    sFilterConfig.FilterIdLow  = (uint16_t)((ltl_filter_id << 3) | CAN_ID_EXT);
+    sFilterConfig.FilterMaskIdHigh = (uint16_t)((strict_mask << 3) >> 16);
+    sFilterConfig.FilterMaskIdLow  = (uint16_t)((strict_mask << 3) | CAN_ID_EXT);
+
+    if (HAL_CAN_ConfigFilter(&hcan, &sFilterConfig) != HAL_OK) {
         Error_Handler();
     }
+
+    // CAN 시작 및 인터럽트 활성화
     HAL_CAN_Start(&hcan);
     HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
 }
 
+// ecs_can.c 내 수신 처리 예시
 void ECS_CAN_ParseRxMessage(uint32_t rxId, uint8_t* rxData) {
-    if (rxId == CAN_ID_DET_RX) {
-        // 탐색기 좌표 수신 로직 (기존과 동일, float 캐스팅 확인)
-        TargetPayload_t payload;
-        for(int i = 0; i < 8; i++) payload.buffer[i] = rxData[i];
-        g_Target_X_mm = payload.targetPos.x_mm;
-        g_Target_Y_mm = payload.targetPos.y_mm;
+    if (rxId == 0x00000200) {
+        // 💡 8바이트 데이터를 float 2개로 해석
+        float* pData = (float*)rxData;
+        g_Target_X_mm = pData[0]; // target_x
+        g_Target_Y_mm = pData[1]; // target_y
         g_NewTarget_Flag = 1;
-    }
-    else if (rxId == CAN_ID_LTL_RX) {
-        // 발사대 상태 수신 로직 추가
-        g_Launcher_Status = rxData[0]; // 1번째 바이트에 상태 저장
     }
 }
 
@@ -73,19 +86,24 @@ void ECS_CAN_SendToLauncher(float angle, LtlCommand_e cmd) {
     HAL_CAN_AddTxMessage(&hcan, &TxHeader, txPayload.buffer, &TxMailbox);
 }
 
-// 💡 탐색기 제어 명령 송신 함수 추가
 void ECS_CAN_SendToSeeker(DetCommand_e cmd) {
     CAN_TxHeaderTypeDef TxHeader;
     uint32_t TxMailbox;
-    uint8_t txData[8] = {0,}; // 8바이트 0으로 초기화 (패딩)
+    uint8_t txData[8] = {0,};
 
-    TxHeader.ExtId = CAN_ID_DET_TX;    // 0x00000100
-    TxHeader.IDE = CAN_ID_EXT;
-    TxHeader.RTR = CAN_RTR_DATA;
-    TxHeader.DLC = 8; // 고정 8바이트
+    // 💡 탐색기 팀의 필터(0x100 + Strict Mask)를 통과하기 위한 설정
+    TxHeader.ExtId = 0x100;           // CAN_ID_DET_TX (SDD 규격)
+    TxHeader.IDE   = CAN_ID_EXT;      // 확장 ID 필수
+    TxHeader.RTR   = CAN_RTR_DATA;
+    TxHeader.DLC   = 8;               // 탐색기 팀과 맞춤 (8바이트)
     TxHeader.TransmitGlobalTime = DISABLE;
 
-    txData[0] = (uint8_t)cmd; // 1번째 바이트에 명령 코드 삽입
+    // 💡 탐색기 팀은 RxData[0]을 g_SystemMode로 사용함
+    txData[0] = (uint8_t)cmd;
 
-    HAL_CAN_AddTxMessage(&hcan, &TxHeader, txData, &TxMailbox);
+    // 메시지 전송
+    if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, txData, &TxMailbox) != HAL_OK) {
+        // 송신 실패 시 디버깅 (필요 시 LED 제어 등)
+        Error_Handler();
+    }
 }
