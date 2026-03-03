@@ -22,6 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "ecs_can.h"
+#include "ecs_math.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,16 +42,24 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CAN_HandleTypeDef hcan;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+/* USER CODE BEGIN PV */
+float g_Last_Angle = 0.0f; // 계산된 최신 방위각 기억용
+uint8_t uart_rx_byte;      // 1바이트씩 받을 변수
+uint8_t uart_rx_buf[10];   // 패킷을 모아둘 버퍼
+uint8_t uart_rx_idx = 0;
+/* USER CODE END PV */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_CAN_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -89,15 +99,36 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_CAN_Init();
   /* USER CODE BEGIN 2 */
+    ECS_CAN_Filter_Init();
 
-  /* USER CODE END 2 */
+    // 💡 메인 루프 진입 전에 UART 인터럽트 수신을 최초 1회 시작해 줍니다.
+    HAL_UART_Receive_IT(&huart2, &uart_rx_byte, 1);
+    /* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  ECS_CAN_Filter_Init();
-  while (1)
-  {
+    /* Infinite loop */
+    /* USER CODE BEGIN WHILE */
+    while (1)
+    {
+        if (g_NewTarget_Flag == 1) {
+            g_NewTarget_Flag = 0;
+
+            float currentX = g_Target_X_mm;
+            float currentY = g_Target_Y_mm;
+
+            float finalAngle = ECS_Math_CalAngle(currentX, currentY);
+
+            // 💡 발사대 사격 시 이 각도를 쓰기 위해 전역 변수에 저장
+            g_Last_Angle = finalAngle;
+
+            // 조준(ALIGN) 명령 전송
+            ECS_CAN_SendToLauncher(finalAngle, LTL_CMD_ALIGN);
+
+            char uartBuf[100];
+            sprintf(uartBuf, "%.1f,%.1f,%.1f,%d\n", currentX, currentY, finalAngle, g_Launcher_Status);
+            HAL_UART_Transmit(&huart2, (uint8_t*)uartBuf, strlen(uartBuf), 100);
+        }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -141,6 +172,43 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief CAN Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN_Init(void)
+{
+
+  /* USER CODE BEGIN CAN_Init 0 */
+
+  /* USER CODE END CAN_Init 0 */
+
+  /* USER CODE BEGIN CAN_Init 1 */
+
+  /* USER CODE END CAN_Init 1 */
+  hcan.Instance = CAN1;
+  hcan.Init.Prescaler = 4;
+  hcan.Init.Mode = CAN_MODE_NORMAL;
+  hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_13TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_2TQ;
+  hcan.Init.TimeTriggeredMode = DISABLE;
+  hcan.Init.AutoBusOff = DISABLE;
+  hcan.Init.AutoWakeUp = DISABLE;
+  hcan.Init.AutoRetransmission = DISABLE;
+  hcan.Init.ReceiveFifoLocked = DISABLE;
+  hcan.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN_Init 2 */
+
+  /* USER CODE END CAN_Init 2 */
+
 }
 
 /**
@@ -218,7 +286,47 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART2) {
+        // [데이터 축적] 들어온 1바이트를 버퍼에 저장
+        uart_rx_buf[uart_rx_idx++] = uart_rx_byte;
 
+        // [패킷 종료 확인] 0x03(ETX)이 들어오면 해석 시작
+        if (uart_rx_byte == 0x03) {
+
+            // [유효성 검사] 시작이 0x02(STX)인지 확인
+            if (uart_rx_buf[0] == 0x02) {
+
+                // 1. 발사대 사격 명령 (0x01)
+                if (uart_rx_buf[1] == 0x01) {
+                    ECS_CAN_SendToLauncher(g_Last_Angle, LTL_CMD_FIRE);
+                }
+                // 2. 탐색기 운용(탐색 시작) 명령 (0x02)
+                else if (uart_rx_buf[1] == 0x02) {
+                    ECS_CAN_SendToSeeker(DET_CMD_STANDBY);
+                }
+                // 3. 탐색기 정지(탐색 중지) 명령 (0x03)
+                else if (uart_rx_buf[1] == 0x03) {
+                    ECS_CAN_SendToSeeker(DET_CMD_RESET);
+                }
+                // 4. 시스템 긴급 정지 명령 (0x04)
+                else if (uart_rx_buf[1] == 0x04) {
+                    // 발사대 모터 정지 및 탐색기 리셋 동시 하달
+                    ECS_CAN_SendToLauncher(g_Last_Angle, LTL_CMD_EMERGENCY);
+                    ECS_CAN_SendToSeeker(DET_CMD_RESET);
+                }
+            }
+            // 패킷 처리가 끝났으니 인덱스 초기화
+            uart_rx_idx = 0;
+        }
+
+        // 버퍼 오버플로우 방지 (패킷이 너무 길어지면 강제 초기화)
+        if (uart_rx_idx >= 10) uart_rx_idx = 0;
+
+        // 💡 [가장 중요] 다음 1바이트 수신을 위해 인터럽트 재활성화
+        HAL_UART_Receive_IT(&huart2, &uart_rx_byte, 1);
+    }
+}
 /* USER CODE END 4 */
 
 /**

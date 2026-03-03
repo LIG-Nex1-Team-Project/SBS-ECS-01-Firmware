@@ -55,7 +55,8 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-
+extern CAN_HandleTypeDef hcan;
+extern UART_HandleTypeDef huart2;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -199,6 +200,34 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles USB low priority or CAN RX0 interrupts.
+  */
+void USB_LP_CAN1_RX0_IRQHandler(void)
+{
+  /* USER CODE BEGIN USB_LP_CAN1_RX0_IRQn 0 */
+
+  /* USER CODE END USB_LP_CAN1_RX0_IRQn 0 */
+  HAL_CAN_IRQHandler(&hcan);
+  /* USER CODE BEGIN USB_LP_CAN1_RX0_IRQn 1 */
+
+  /* USER CODE END USB_LP_CAN1_RX0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART2 global interrupt.
+  */
+void USART2_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART2_IRQn 0 */
+
+  /* USER CODE END USART2_IRQn 0 */
+  HAL_UART_IRQHandler(&huart2);
+  /* USER CODE BEGIN USART2_IRQn 1 */
+
+  /* USER CODE END USART2_IRQn 1 */
+}
+
+/**
   * @brief This function handles EXTI line[15:10] interrupts.
   */
 void EXTI15_10_IRQHandler(void)
@@ -213,5 +242,23 @@ void EXTI15_10_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+
+// HAL ?ùº?ù¥Î∏åÎü¨Î¶¨Ïóê?Ñú CAN ?àò?ã† ?ãú ?ûê?èô?úºÎ°? ?ò∏Ï∂úÌï¥Ï£ºÎäî ÏΩúÎ∞± ?ï®?àò
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
+    CAN_RxHeaderTypeDef RxHeader;
+    uint8_t RxData[8];
+
+    if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
+
+        // ?üí? ?Éê?ÉâÍ∏∞Î°úÎ∂??Ñ∞ ?ç∞?ù¥?Ñ∞Í∞? ?ì§?ñ¥?ò¨ ?ïåÎßàÎã§ ECS Î≥¥Îìú LED ÍπúÎπ°?ûÑ!
+        HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+
+        if (RxHeader.IDE == CAN_ID_EXT) {
+            ECS_CAN_ParseRxMessage(RxHeader.ExtId, RxData);
+        } else {
+            ECS_CAN_ParseRxMessage(RxHeader.StdId, RxData);
+        }
+    }
+}
 
 /* USER CODE END 1 */

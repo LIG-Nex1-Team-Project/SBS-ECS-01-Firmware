@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+.metadata/
+.settings/
+SBS_ECS_Firmware/Bin/
+SBS_ECS_Firmware/Debug/
+SBS_ECS_Firmware/Release/
