@@ -22,7 +22,7 @@ void ECS_CAN_Filter_Init(void) {
     // 1. 탐색기(Seeker) 수신 필터 (FilterBank 0)
     // ---------------------------------------------------------
     uint32_t det_filter_id = 0x00000200;
-    uint32_t strict_mask = 0x1FFFFFFF; // 29비트 전체 엄격 검사
+    uint32_t strict_mask = 0x00000000; // 29비트 전체 엄격 검사
 
     sFilterConfig.FilterBank = 0;
     sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
@@ -58,20 +58,20 @@ void ECS_CAN_Filter_Init(void) {
 
 // ecs_can.c 내 수신 처리 예시
 void ECS_CAN_ParseRxMessage(uint32_t rxId, uint8_t* rxData) {
-    if (rxId == 0x00000200) { // DET
-        // 💡 8바이트 데이터를 float 2개로 해석
-        float* pData = (float*)rxData;
-        g_Target_X_mm = pData[0]; // target_x
-        g_Target_Y_mm = pData[1]; // target_y
+    if (rxId == 0x00000200) {
+        // memcpy를 사용하여 안전하게 float으로 복사
+        memcpy((void*)&g_Target_X_mm, &rxData[0], 4);
+        memcpy((void*)&g_Target_Y_mm, &rxData[4], 4);
         g_NewTarget_Flag = 1;
+
+        // 디버깅용 출력 (실제 운용시엔 제거 권장)
+        printf("Received Pos: %f, %f\n", g_Target_X_mm, g_Target_Y_mm);
     }
-    if (rxId == 0x00000400) { // LANCHER
-
-    	//
-           uint8_t temp_state_Launcher = rxData[0];
-    }
-
-
+    if (rxId == 0x00000400) { // 발사대 상태 수신
+            g_Launcher_Status = rxData[0]; // 발사대 상태 저장
+            printf("[CAN] Launcher Status Received: %d\r\n", g_Launcher_Status);
+        }
+    // ... 이하 생략
 }
 
 void ECS_CAN_SendToLauncher(float angle, LtlCommand_e cmd) {
@@ -91,6 +91,13 @@ void ECS_CAN_SendToLauncher(float angle, LtlCommand_e cmd) {
     for(int i = 5; i < 8; i++) txPayload.buffer[i] = 0;
 
     HAL_CAN_AddTxMessage(&hcan, &TxHeader, txPayload.buffer, &TxMailbox);
+
+    if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, txPayload.buffer, &TxMailbox) == HAL_OK) {
+            printf("[CAN] Send to Launcher: Angle %.1f, Cmd %d\r\n", angle, cmd);
+        } else{
+            printf("[CAN] Send Error! (Code: 0x%lx)\r\n", HAL_CAN_GetError(&hcan));
+        }
+
 }
 
 void ECS_CAN_SendToSeeker(DetCommand_e cmd) {
@@ -114,3 +121,4 @@ void ECS_CAN_SendToSeeker(DetCommand_e cmd) {
         Error_Handler();
     }
 }
+
