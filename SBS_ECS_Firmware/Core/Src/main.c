@@ -66,7 +66,13 @@ static void MX_CAN_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+int __io_putchar(int ch)
+{
+ if ( ch == '\n' )
+	 HAL_UART_Transmit(&huart2, (uint8_t*)&"\r", 1, HAL_MAX_DELAY);
+ HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
+ return ch;
+}
 /* USER CODE END 0 */
 
 /**
@@ -105,6 +111,10 @@ int main(void)
 
     // 💡 메인 루프 진입 전에 UART 인터럽트 수신을 최초 1회 시작해 줍니다.
     HAL_UART_Receive_IT(&huart2, &uart_rx_byte, 1);
+
+    // [추가] UART 동작 확인용 테스트 메시지
+    printf("ECS System Started...\r\n");
+    HAL_UART_Transmit(&huart2, (uint8_t*)"UART OK\r\n", 9, 100);
     /* USER CODE END 2 */
 
     /* Infinite loop */
