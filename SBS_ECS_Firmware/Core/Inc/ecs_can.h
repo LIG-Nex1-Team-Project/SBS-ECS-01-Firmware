@@ -32,11 +32,11 @@ typedef enum {
 
 // 발사대 상태 열거형 업데이트
 typedef enum {
-    LTL_STATUS_INIT   = 0x00, // 초기화 / 대기
-    LTL_STATUS_ALIGN  = 0x01, // 정렬 중 (움직이는 중)
-    LTL_STATUS_READY  = 0x02, // 정렬 완료 (조준 성공!)
-    LTL_STATUS_FIRE   = 0x03, // 사격 중 / 사격 완료
-    LTL_STATUS_ERROR  = 0x04  // 장치 고장 (ERROR)
+    LTL_STATUS_INIT   = 0x00, // 초기화
+    LTL_STATUS_ALIGN  = 0x01, // 정렬 신호 수신 대기
+    LTL_STATUS_READY  = 0x02, // 정렬 중
+    LTL_STATUS_FIRE   = 0x03, // 사격 중
+    LTL_STATUS_ERROR  = 0x04  // 장치 고장
 } LtlStatus_e;
 
 // 수신용(DET) 페이로드 (Target_X_Coord, Target_Y_Coord)

@@ -243,14 +243,14 @@ void EXTI15_10_IRQHandler(void)
 
 /* USER CODE BEGIN 1 */
 
-// HAL ?¼?´ë¸ŒëŸ¬ë¦¬ì—?„œ CAN ?ˆ˜?‹  ?‹œ ??™?œ¼ë¡? ?˜¸ì¶œí•´ì£¼ëŠ” ì½œë°± ?•¨?ˆ˜
+// HAL ì½œë°±
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
     CAN_RxHeaderTypeDef RxHeader;
     uint8_t RxData[8];
 
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
 
-        // ?Ÿ’? ?ƒ?ƒ‰ê¸°ë¡œë¶??„° ?°?´?„°ê°? ?“¤?–´?˜¬ ?•Œë§ˆë‹¤ ECS ë³´ë“œ LED ê¹œë¹¡?„!
+        // ë³´ë“œ LED ì ë“±
         HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
 
         if (RxHeader.IDE == CAN_ID_EXT) {
