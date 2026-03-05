@@ -121,26 +121,43 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-    	//can_test
-    	//ECS_CAN_SendToLauncher(45.0f, LTL_CMD_ALIGN);
+        // 1. 탐색기 데이터 처리 (의존성 분리)
+        // 데이터가 들어올 때만 '좌표'와 '계산된 각도'를 최신화함
         if (g_NewTarget_Flag == 1) {
             g_NewTarget_Flag = 0;
 
-            float currentX = g_Target_X_mm;
-            float currentY = g_Target_Y_mm;
+            // 최신 좌표와 각도 업데이트 (저장만 하고 발사대로 명령은 안 쏨)
+            g_Last_Angle = ECS_Math_CalAngle(g_Target_X_mm, g_Target_Y_mm);
+        }
 
-            float finalAngle = ECS_Math_CalAngle(currentX, currentY);
-
-            // 💡 발사대 사격 시 이 각도를 쓰기 위해 전역 변수에 저장
-            g_Last_Angle = finalAngle;
-
-            // 조준(ALIGN) 명령 전송
-            ECS_CAN_SendToLauncher(finalAngle, LTL_CMD_ALIGN);
+        // 2. UI 주기적 업데이트 (독립적 동작)
+        // 탐색기 데이터 수신 여부와 상관없이 1000ms(1초)마다 UI에 현재 상태 전송
+        static uint32_t last_ui_tick = 0;
+        if (HAL_GetTick() - last_ui_tick >= 1000) {
+            last_ui_tick = HAL_GetTick();
 
             char uartBuf[100];
-            sprintf(uartBuf, "%.1f,%.1f,%.1f,%d\n", currentX, currentY, finalAngle, g_Launcher_Status);
-            HAL_UART_Transmit(&huart2, (uint8_t*)uartBuf, strlen(uartBuf), 100);
+            // 현재 저장된 X, Y, 각도, 그리고 발사대로부터 받은 최신 상태를 무조건 전송
+            sprintf(uartBuf, "%.1f,%.1f,%.1f,%d\n",
+                    g_Target_X_mm, g_Target_Y_mm, g_Last_Angle, g_Launcher_Status);
+
+            HAL_UART_Transmit(&huart2, (uint8_t*)uartBuf, strlen(uartBuf), 10);
         }
+
+        /* 💡 [참고] 발사대 제어 명령(ALIGN, FIRE 등)은 여기서 처리하지 않습니다.
+           앞서 수정했던 'HAL_UART_RxCpltCallback' 인터럽트 함수가 UI 버튼 신호를
+           받는 즉시 독립적으로 발사대에 CAN 메시지를 쏘게 됩니다.
+        */
+        // ⭐ [테스트 코드] 2초마다 강제로 발사대에 '정렬' 명령을 보냄
+//            static uint32_t test_tick = 0;
+//            if (HAL_GetTick() - test_tick >= 2000) {
+//                test_tick = HAL_GetTick();
+//
+//                // 45도 각도로 정렬 명령 강제 전송
+//                ECS_CAN_SendToLauncher(45.0f, LTL_CMD_ALIGN);
+//                printf("[TEST] Manually sending ALIGN to Launcher...\n");
+//            }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -300,42 +317,58 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance == USART2) {
-        // [데이터 축적] 들어온 1바이트를 버퍼에 저장
+    	// ** 테스트용[진단 로그] 어떤 바이트든 들어오면 무조건 출력해봅니다.
+		//printf("RX: 0x%02X, Idx: %d\n", uart_rx_byte, uart_rx_idx);
+
+        // 1바이트 수신 데이터를 버퍼에 저장
         uart_rx_buf[uart_rx_idx++] = uart_rx_byte;
 
-        // [패킷 종료 확인] 0x03(ETX)이 들어오면 해석 시작
+        // [패킷 종료 확인] ETX(0x03)가 들어오면 해석 시작
         if (uart_rx_byte == 0x03) {
-
-            // [유효성 검사] 시작이 0x02(STX)인지 확인
+            // [유효성 검사] 시작이 STX(0x02)인지 확인
             if (uart_rx_buf[0] == 0x02) {
+                uint8_t cmd = uart_rx_buf[1]; // UI가 보낸 명령어 코드
 
-                // 1. 발사대 사격 명령 (0x01)
-                if (uart_rx_buf[1] == 0x01) {
-                    ECS_CAN_SendToLauncher(g_Last_Angle, LTL_CMD_FIRE);
-                }
-                // 2. 탐색기 운용(탐색 시작) 명령 (0x02)
-                else if (uart_rx_buf[1] == 0x02) {
-                    ECS_CAN_SendToSeeker(DET_CMD_STANDBY);
-                }
-                // 3. 탐색기 정지(탐색 중지) 명령 (0x03)
-                else if (uart_rx_buf[1] == 0x03) {
-                    ECS_CAN_SendToSeeker(DET_CMD_RESET);
-                }
-                // 4. 시스템 긴급 정지 명령 (0x04)
-                else if (uart_rx_buf[1] == 0x04) {
-                    // 발사대 모터 정지 및 탐색기 리셋 동시 하달
-                    ECS_CAN_SendToLauncher(g_Last_Angle, LTL_CMD_EMERGENCY);
-                    ECS_CAN_SendToSeeker(DET_CMD_RESET);
+                switch (cmd) {
+                    case 0x00: // LauncherAlign (UI: 0x00)
+                        ECS_CAN_SendToLauncher(g_Last_Angle, LTL_CMD_ALIGN);
+                        printf("[UART] Launcher ALIGN Command\n");
+                        break;
+
+                    case 0x01: // LauncherFire (UI: 0x01)
+                        ECS_CAN_SendToLauncher(g_Last_Angle, LTL_CMD_FIRE);
+                        printf("[UART] Launcher FIRE Command\n");
+                        break;
+
+                    case 0x02: // SeekerStart (UI: 0x02)
+                        ECS_CAN_SendToSeeker(DET_CMD_STANDBY);
+                        printf("[UART] Seeker START Command\n");
+                        break;
+
+                    case 0x03: // SeekerStop (UI: 0x03)
+                        ECS_CAN_SendToSeeker(DET_CMD_RESET);
+                        printf("[UART] Seeker STOP Command\n");
+                        break;
+
+                    case 0x04: // EmergencyStop (UI: 0x04)
+                        ECS_CAN_SendToLauncher(g_Last_Angle, LTL_CMD_EMERGENCY);
+                        ECS_CAN_SendToSeeker(DET_CMD_RESET);
+                        printf("[UART] EMERGENCY STOP Command\n");
+                        break;
+
+                    default:
+                        printf("[UART] Unknown Command: 0x%02X\n", cmd);
+                        break;
                 }
             }
-            // 패킷 처리가 끝났으니 인덱스 초기화
+            // 패킷 처리 완료 후 인덱스 초기화
             uart_rx_idx = 0;
         }
 
-        // 버퍼 오버플로우 방지 (패킷이 너무 길어지면 강제 초기화)
+        // 버퍼 오버플로우 방지
         if (uart_rx_idx >= 10) uart_rx_idx = 0;
 
-        // 💡 [가장 중요] 다음 1바이트 수신을 위해 인터럽트 재활성화
+        // 다음 바이트 수신 대기 (중요!)
         HAL_UART_Receive_IT(&huart2, &uart_rx_byte, 1);
     }
 }

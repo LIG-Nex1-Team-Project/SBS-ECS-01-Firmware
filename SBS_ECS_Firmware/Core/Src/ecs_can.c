@@ -59,19 +59,28 @@ void ECS_CAN_Filter_Init(void) {
 // ecs_can.c 내 수신 처리 예시
 void ECS_CAN_ParseRxMessage(uint32_t rxId, uint8_t* rxData) {
     if (rxId == 0x00000200) {
-        // memcpy를 사용하여 안전하게 float으로 복사
+        // 데이터 복사 및 플래그 설정
         memcpy((void*)&g_Target_X_mm, &rxData[0], 4);
         memcpy((void*)&g_Target_Y_mm, &rxData[4], 4);
         g_NewTarget_Flag = 1;
 
-        // 디버깅용 출력 (실제 운용시엔 제거 권장)
-        printf("Received Pos: %f, %f\n", g_Target_X_mm, g_Target_Y_mm);
-    }
-    if (rxId == 0x00000400) { // 발사대 상태 수신
-            g_Launcher_Status = rxData[0]; // 발사대 상태 저장
-            printf("[CAN] Launcher Status Received: %d\r\n", g_Launcher_Status);
+        // 💡 [수정] 1초(1000ms) 주기로 로그 출력 제한
+        static uint32_t last_pos_print_tick = 0;
+        if (HAL_GetTick() - last_pos_print_tick >= 1000) {
+            printf("Received Pos: %.1f, %.1f\n", g_Target_X_mm, g_Target_Y_mm);
+            last_pos_print_tick = HAL_GetTick();
         }
-    // ... 이하 생략
+    }
+
+    if (rxId == 0x00000400) {
+        static uint8_t last_status = 255;
+        g_Launcher_Status = rxData[0];
+
+        if (g_Launcher_Status != last_status) {
+            printf("[CAN] Launcher Status Changed: %d -> %d\r\n", last_status, g_Launcher_Status);
+            last_status = g_Launcher_Status;
+        }
+    }
 }
 
 void ECS_CAN_SendToLauncher(float angle, LtlCommand_e cmd) {
@@ -90,8 +99,6 @@ void ECS_CAN_SendToLauncher(float angle, LtlCommand_e cmd) {
 
     for(int i = 5; i < 8; i++) txPayload.buffer[i] = 0;
 
-    HAL_CAN_AddTxMessage(&hcan, &TxHeader, txPayload.buffer, &TxMailbox);
-
     if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, txPayload.buffer, &TxMailbox) == HAL_OK) {
             printf("[CAN] Send to Launcher: Angle %.1f, Cmd %d\r\n", angle, cmd);
         } else{
@@ -102,7 +109,7 @@ void ECS_CAN_SendToLauncher(float angle, LtlCommand_e cmd) {
 
 void ECS_CAN_SendToSeeker(DetCommand_e cmd) {
     CAN_TxHeaderTypeDef TxHeader;
-    uint32_t TxMailbox;
+    uint32_t txMailbox;
     uint8_t txData[8] = {0,};
 
     // 💡 탐색기 팀의 필터(0x100 + Strict Mask)를 통과하기 위한 설정
@@ -115,10 +122,11 @@ void ECS_CAN_SendToSeeker(DetCommand_e cmd) {
     // 💡 탐색기 팀은 RxData[0]을 g_SystemMode로 사용함
     txData[0] = (uint8_t)cmd;
 
-    // 메시지 전송
-    if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, txData, &TxMailbox) != HAL_OK) {
-        // 송신 실패 시 디버깅 (필요 시 LED 제어 등)
-        Error_Handler();
-    }
+    if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, txData, &txMailbox) != HAL_OK) {
+            // 💡 만약 이 로그가 뜬다면 ECS 내부에서 송신 자체가 실패하는 것임
+            printf("[CAN Error] Send to Seeker FAILED! Error Code: %ld\n", HAL_CAN_GetError(&hcan));
+        } else {
+            printf("[CAN Success] Message 0x100 sent to Seeker!\n");
+        }
 }
 
