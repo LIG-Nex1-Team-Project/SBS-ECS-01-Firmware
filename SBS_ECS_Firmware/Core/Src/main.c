@@ -321,13 +321,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 		//printf("RX: 0x%02X, Idx: %d\n", uart_rx_byte, uart_rx_idx);
 
         // 1바이트 수신 데이터를 버퍼에 저장
-        uart_rx_buf[uart_rx_idx++] = uart_rx_byte;
+        uart_rx_buf[uart_rx_idx] = uart_rx_byte;
 
         // [패킷 종료 확인] ETX(0x03)가 들어오면 해석 시작
-        if (uart_rx_byte == 0x03) {
+        //if (uart_rx_byte == 0x03) {
             // [유효성 검사] 시작이 STX(0x02)인지 확인
-            if (uart_rx_buf[0] == 0x02) {
-                uint8_t cmd = uart_rx_buf[1]; // UI가 보낸 명령어 코드
+        if(1) {
+            //if (uart_rx_buf[0] == 0x02) {
+        	if(1) {
+                uint8_t cmd = uart_rx_buf[uart_rx_idx++]; // UI가 보낸 명령어 코드
 
                 switch (cmd) {
                     case 0x00: // LauncherAlign (UI: 0x00)

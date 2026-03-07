@@ -10,7 +10,7 @@
 
 // 발사대의 물리적 위치 오프셋 (탐색기 원점 기준, mm 단위)
 // 예시: 발사대가 탐색기 우측으로 500mm 떨어져 있다고 가정
-#define LAUNCHER_OFFSET_X  500.0f
+#define LAUNCHER_OFFSET_X  250.0f
 #define LAUNCHER_OFFSET_Y  0.0f
 
 #define MATH_PI  3.14159265358979323846f
